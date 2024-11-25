@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import Toplevel, filedialog, messagebox
 from PIL import Image, ImageTk, ImageEnhance
 import uuid
+import pyautogui
 import pytesseract
 import logging
 from ..utils.config import (
@@ -51,8 +52,8 @@ class OptionsWindow:
             # 计算适当的图片显示尺寸
             screen_width = self.options_root.winfo_screenwidth()
             screen_height = self.options_root.winfo_screenheight()
-            max_width = int(screen_width * 0.85)
-            max_height = int(screen_height * 0.85)
+            max_width = int(screen_width * 0.9)
+            max_height = int(screen_height * 0.9)
 
             # 调整图片大小
             img_width, img_height = self.img.size
@@ -147,6 +148,9 @@ class OptionsWindow:
             self.options_root.bind('<Key>', lambda e: self.cancel() if e.keysym == 'Escape' else None)
             self.options_root.protocol("WM_DELETE_WINDOW", self.cancel)
 
+            # 绑定 Ctrl + S 以保存
+            self.options_root.bind('<Control-s>', lambda e: self.save())
+
             # 添加进度条显示
             self.progress_var = tk.StringVar()
             progress_label = tk.Label(
@@ -188,7 +192,15 @@ class OptionsWindow:
             
             # 优化图片预处理
             width, height = self.img.size
-            scale_factor = 2
+            # 获取屏幕分辨率
+            screen_width, screen_height = pyautogui.size()
+            max_img_px = width * height
+            max_screen_px = screen_width * screen_height
+            if max_img_px >= max_screen_px * 0.7:
+                scale_factor = 1
+            else:
+                scale_factor = 2
+            
             enlarged_img = self.img.resize((width * scale_factor, height * scale_factor), Image.Resampling.LANCZOS)
             
             # 转换为灰度图并增强
@@ -223,7 +235,7 @@ class OptionsWindow:
             # 复制到剪贴板
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
-            
+
             # 显示文本窗口
             text_window = Toplevel(self.options_root)
             text_window.title("提取的文字")
@@ -245,11 +257,14 @@ class OptionsWindow:
             
             # 设置文本窗口大小和位置
             text_window.update_idletasks()
+
             window_width = min(text_window.winfo_screenwidth() * 0.8, 800)
             window_height = min(text_window.winfo_screenheight() * 0.8, 600)
             x = (text_window.winfo_screenwidth() // 2) - (window_width // 2)
             y = (text_window.winfo_screenheight() // 2) - (window_height // 2)
             text_window.geometry(f"{int(window_width)}x{int(window_height)}+{int(x)}+{int(y)}")
+            
+            text_window.protocol("WM_DELETE_WINDOW", self.cancel)
             
         except Exception as e:
             logging.error(f"文字提取失败: {str(e)}")
