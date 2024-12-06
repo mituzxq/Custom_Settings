@@ -90,7 +90,7 @@ class IMEMonitor:
                 )
 
                 # 定义需要注册的按键
-                keys_to_register = ['ctrl', 'alt','shift','win']
+                keys_to_register = ['ctrl', 'alt', 'shift', 'win']
                 for key in keys_to_register:
                     self.keyboard_hooks.append(
                         keyboard.on_press_key(key, self._on_keyboard_press)

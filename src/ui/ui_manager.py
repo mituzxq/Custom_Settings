@@ -19,6 +19,7 @@ class OptionsWindow:
         self.screenshot_queue = screenshot_queue
         self.options_root = None
         self.config = Config()
+        self.ocr_cache = None
         self.setup_window()
 
     def setup_window(self):
@@ -96,6 +97,7 @@ class OptionsWindow:
             buttons = [
                 ("重新截取", self.retake),
                 ("文字提取", self.extract_text),
+                ("翻译", self.extract_translate),
                 ("保存", self.save),
                 ("取消", self.cancel)
             ]
@@ -174,74 +176,127 @@ class OptionsWindow:
         else:
             logging.error("没有可用的截图队列")
 
-    def extract_text(self):
-        """提取文字"""
+    def _preprocess_image(self):
+        """图片预处理"""
         try:
-            # 检查Tesseract路径
-            tesseract_path = self.config.get_tesseract_path()
-            
-            if not tesseract_path:
-                logging.warning("未设置Tesseract路径")
-                messagebox.showerror(
-                    "错误",
-                    "未设置Tesseract路径，无法使用文字识别功能"
-                )
-                return
-            
-            pytesseract.pytesseract.tesseract_cmd = tesseract_path
-            
-            # 优化图片预处理
+            # 计算缩放因子
             width, height = self.img.size
-            # 获取屏幕分辨率
             screen_width, screen_height = pyautogui.size()
             max_img_px = width * height
             max_screen_px = screen_width * screen_height
-            if max_img_px >= max_screen_px * 0.7:
-                scale_factor = 1
-            else:
-                scale_factor = 2
+            scale_factor = 1 if max_img_px >= max_screen_px * 0.7 else 2
             
-            enlarged_img = self.img.resize((width * scale_factor, height * scale_factor), Image.Resampling.LANCZOS)
+            # 图片缩放
+            enlarged_img = self.img.resize(
+                (width * scale_factor, height * scale_factor), 
+                Image.Resampling.LANCZOS
+            )
             
-            # 转换为灰度图并增强
+            # 图片增强
             gray_image = enlarged_img.convert('L')
-            enhancer = ImageEnhance.Contrast(gray_image)
-            enhanced_image = enhancer.enhance(2.5)
-            brightness = ImageEnhance.Brightness(enhanced_image)
-            enhanced_image = brightness.enhance(1.2)
-            
-            # OCR配置
-            custom_config = r'''--oem 3 
-                --psm 6 
-                -c preserve_interword_spaces=1
-            '''
+            contrast = ImageEnhance.Contrast(gray_image).enhance(2.5)
+            return ImageEnhance.Brightness(contrast).enhance(1.2)
+        except Exception as e:
+            logging.error(f"图片预处理失败: {str(e)}")
+            raise
+
+    def _perform_ocr(self, image):
+        """执行OCR识别"""
+        try:
+            # 检查Tesseract路径
+            tesseract_path = self.config.get_tesseract_path()
+            if not tesseract_path:
+                raise ValueError("未设置Tesseract路径")
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
             
             # OCR识别
             text = pytesseract.image_to_string(
-                enhanced_image,
+                image,
                 lang='chi_sim+eng+equ',
-                config=custom_config
+                config=r'--oem 3 --psm 6 -c preserve_interword_spaces=1'
             )
             
-            # 清理文本
-            lines = []
-            for line in text.splitlines():
-                line = line.strip()
-                if line and not line.isspace():
-                    line = ' '.join(line.split())
-                    lines.append(line)
+            # 文本清理
+            lines = [
+                ' '.join(line.split())
+                for line in text.splitlines()
+                if line.strip() and not line.isspace()
+            ]
+            return lines
+            
+        except Exception as e:
+            logging.error(f"OCR识别失败: {str(e)}")
+            raise
+
+    def _get_ocr_result(self):
+        """获取OCR结果，如果已有缓存则直接返回"""
+        if self.ocr_cache is None:
+            try:
+                # 图片预处理和OCR
+                enhanced_image = self._preprocess_image()
+                self.ocr_cache = self._perform_ocr(enhanced_image)
+            except Exception as e:
+                logging.error(f"OCR处理失败: {str(e)}")
+                raise
+        return self.ocr_cache
+
+    def extract_translate(self):
+        """翻译功能"""
+        try:
+            # 获取OCR结果（使用缓存）
+            lines = self._get_ocr_result()
+            
+            # 将所有文本连接成一行
+            text = ' '.join(lines)
+            
+            # 复制到剪贴板
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            
+            # 模拟快捷键操作
+            try:
+                # 打开有道翻译mini窗口
+                pyautogui.keyDown('ctrl')
+                pyautogui.keyDown('alt')
+                pyautogui.press('m')
+                pyautogui.keyUp('alt')
+                pyautogui.keyUp('ctrl')
+                
+                # 粘贴并回车
+                pyautogui.keyDown('ctrl')
+                pyautogui.press('v')
+                pyautogui.keyUp('ctrl')
+                pyautogui.press('enter')
+                
+            except Exception as e:
+                logging.error(f"模拟按键失败: {str(e)}")
+                raise
+                
+        except ValueError as e:
+            messagebox.showerror("错误", "未设置Tesseract路径，无法使用文字识别和翻译功能")
+        except Exception as e:
+            messagebox.showerror("错误", f"翻译失败: {str(e)}")
+
+    def extract_text(self):
+        """文字提取功能"""
+        try:
+            # 获取OCR结果（使用缓存）
+            lines = self._get_ocr_result()
+            
+            # 保持换行格式
             text = '\n'.join(lines)
             
             # 复制到剪贴板
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
-
+            
             # 显示文本窗口
             text_window = Toplevel(self.options_root)
             text_window.title("提取的文字")
             text_window.configure(bg=DARK_THEME['BG'])
             text_window.attributes("-topmost", True)
             
+            # 创建文本区域
             text_area = tk.Text(
                 text_window, 
                 wrap="word", 
@@ -255,19 +310,18 @@ class OptionsWindow:
             text_area.pack(expand=True, fill="both", padx=10, pady=10)
             text_area.insert("1.0", text)
             
-            # 设置文本窗口大小和位置
-            text_window.update_idletasks()
-
+            # 设置窗口大小和位置
             window_width = min(text_window.winfo_screenwidth() * 0.8, 800)
             window_height = min(text_window.winfo_screenheight() * 0.8, 600)
             x = (text_window.winfo_screenwidth() // 2) - (window_width // 2)
             y = (text_window.winfo_screenheight() // 2) - (window_height // 2)
             text_window.geometry(f"{int(window_width)}x{int(window_height)}+{int(x)}+{int(y)}")
             
-            text_window.protocol("WM_DELETE_WINDOW", self.cancel)
+            # text_window.protocol("WM_DELETE_WINDOW", self.cancel)
             
+        except ValueError as e:
+            messagebox.showerror("错误", "未设置Tesseract路径，无法使用文字识别和翻译功能")
         except Exception as e:
-            logging.error(f"文字提取失败: {str(e)}")
             messagebox.showerror("错误", f"文字提取失败: {str(e)}")
 
     def save(self):
