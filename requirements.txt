@@ -3,3 +3,4 @@ pystray
 keyboard
 pywin32
 PyInstaller
+psutil
